@@ -1,14 +1,33 @@
 use rustacuda::prelude::*;
 use rustacuda::launch;
-use rustacuda::memory::DeviceBox;
 use std::error::Error;
 use std::ffi::CString;
+
+// Comparison linalg libraries
+use ndarray::Array;
+use std::time::Instant;
+
 
 /// Examples:
 /// Adding two numbers: https://bheisler.github.io/RustaCUDA/rustacuda/index.html
 /// Adding two arrays of numbers: https://bheisler.github.io/RustaCUDA/rustacuda/macro.launch.html
 ///
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() {
+    benchmark_ndarray();
+}
+
+fn benchmark_ndarray_multiplication() {
+    let shape = 500;
+    let a = Array::ones((shape, shape));
+    let b = Array::from_shape_simple_fn((shape, shape), || 2);
+    let start = Instant::now();
+    let c = a.dot(&b);
+    println!("{:?}", c);
+    println!("Elapsed Time: {:?}", start.elapsed());
+
+}
+
+fn rust_cuda() -> Result<(), Box<dyn Error>> {
     // Initialize the CUDA API
     rustacuda::init(CudaFlags::empty())?;
 

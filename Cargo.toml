@@ -10,3 +10,7 @@ edition = "2018"
 rustacuda = "0.1"
 rustacuda_derive = "0.1"
 rustacuda_core = "0.1"
+
+# Comparison linear algebra systems
+ndarray = "0.14.0"
+nalgebra = "0.23.1"
