@@ -14,10 +14,11 @@ use std::time::Instant;
 ///
 fn main() {
     benchmark_ndarray_multiplication();
+    rust_cuda();
 }
 
 fn benchmark_ndarray_multiplication() {
-    let shape = 10000;
+    let shape = 1000;
     let a = Array::from_shape_simple_fn((shape, shape), || 1f32);
     let b = Array::from_shape_simple_fn((shape, shape), || 2f32);
     let start = Instant::now();
@@ -45,35 +46,39 @@ fn rust_cuda() -> Result<(), Box<dyn Error>> {
     // Create a stream to submit work to
     let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
 
-    let mut in_x = DeviceBuffer::from_slice(&[1.0f32, 2.0f32, 3.0f32, 4.0f32, 5.0f32, 6.0f32])?;
-    let mut in_y = DeviceBuffer::from_slice(&[5.0f32, 6.0f32, 7.0f32, 8.0f32, 9f32, 10f32, 11f32, 12f32, 13f32])?;
-    let mut out = DeviceBuffer::from_slice(&[0.0f32; 2*3])?;
+    let shape = 1000;
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 1000*1000])?;
+    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 1000*1000])?;
+    let mut out = DeviceBuffer::from_slice(&[0.0f32; 1000*1000])?;
 
     // Launching kernels is unsafe since Rust can't enforce safety - think of kernel launches
     // as a foreign-function call. In this case, it is - this kernel is written in CUDA C.
+    let start = Instant::now();
     unsafe {
         // Launch with 1x1x1 (1) blocks of 10x1x1 (10) threads, to show that you can use tuples to
         // configure grid and block size.
-        let result = launch!(module.mm_noshared<<<(1, 1, 1), (16, 16, 1), 0, stream>>>(
+        let result = launch!(module.mm_noshared<<<(1, 1, 1), (32, 32, 1), 0, stream>>>(
             in_x.as_device_ptr(),
             in_y.as_device_ptr(),
             out.as_device_ptr(),
-            2, // a rows
-            3, // a cols
-            3, // b rows
-            3, // b cols
-            2, // c rows
-            3  // c cols
+            1000, // a rows
+            1000, // a cols
+            1000, // b rows
+            1000, // b cols
+            1000, // c rows
+            1000  // c cols
         ));
         result?;
     }
 
     // The kernel launch is asynchronous, so we wait for the kernel to finish executing
     stream.synchronize()?;
+    println!("Elapsed Time after synchronize: {:?}", start.elapsed());
 
     // Copy the results back to host memory
-    let mut out_host = [0.0f32; 2*3];
+    let mut out_host = [0.0f32; 1000*1000];
     out.copy_to(&mut out_host)?;
+    println!("Elapsed Time after copy back to host mem: {:?}", start.elapsed());
 
     println!("{:?}", out_host);
     Ok(())
