@@ -13,13 +13,13 @@ use std::time::Instant;
 /// Adding two arrays of numbers: https://bheisler.github.io/RustaCUDA/rustacuda/macro.launch.html
 ///
 fn main() {
-    benchmark_ndarray();
+    benchmark_ndarray_multiplication();
 }
 
 fn benchmark_ndarray_multiplication() {
-    let shape = 500;
-    let a = Array::ones((shape, shape));
-    let b = Array::from_shape_simple_fn((shape, shape), || 2);
+    let shape = 10000;
+    let a = Array::from_shape_simple_fn((shape, shape), || 1f32);
+    let b = Array::from_shape_simple_fn((shape, shape), || 2f32);
     let start = Instant::now();
     let c = a.dot(&b);
     println!("{:?}", c);
