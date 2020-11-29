@@ -1,3 +1,5 @@
+#include <iostream>
+
 /// This is what the add.ptx is compiled from
 /// "nvcc add.cu --ptx"
 extern "C" __global__ void sum(const float* x, const float* y, float* out, int count) {
@@ -15,6 +17,7 @@ extern "C" __global__ void sum(const float* x, const float* y, float* out, int c
 extern "C" __global__ void mm_kernel(float* A, float* B, float* C, int n) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;    // block Index * how wide the block is + thread index
     int row = blockIdx.y * blockDim.y + threadIdx.y;
+//    printf("(%d, %d)", row, col);
     if (row < n && col < n) {
         float sum = 0.0f;
         for (int i = 0; i < n; ++i) {
@@ -22,12 +25,109 @@ extern "C" __global__ void mm_kernel(float* A, float* B, float* C, int n) {
         }
         C[row * n + col] = sum;
     }
+}
 
-    // Multiplying IxJ matrix with JxK matrix gives a matrix with IxK
-    // another way to think about this:
-//    float product_val = 0
-//    for(int k=0;k<width;k++) {
-//      product_val += d_M[row*width+k]*d_N[k*width+col];
-//    }
-//    d_p[row*width+col] = product_val;
+/// From: https://stackoverflow.com/questions/18997773/non-square-matrix-multiplication-in-cuda
+/// This works!
+#define TILE_DIM 16
+extern "C" __global__ void mm_noshared(float* A, float* B, float* C, int ARows, int ACols, int BRows, int BCols, int CRows, int CCols) {
+
+    float CValue = 0;
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    for (int k = 0; k < (TILE_DIM + ACols - 1)/TILE_DIM; k++) {
+
+        for (int n = 0; n < TILE_DIM; ++n)
+            if ((k*TILE_DIM + n < ACols && Row < ARows) && (k*TILE_DIM + n < BRows && Col < BCols))
+                CValue += A[Row*ACols + k*TILE_DIM + n] * B[(k*TILE_DIM + n)*BCols + Col];
+
+    }
+
+    if (Row < CRows && Col < CCols) C[((blockIdx.y * blockDim.y + threadIdx.y)*CCols)+(blockIdx.x*blockDim.x)+threadIdx.x]=CValue;
+}
+
+/// From: https://stackoverflow.com/questions/18815489/cuda-tiled-matrix-matrix-multiplication-with-shared-memory-and-matrix-size-whic
+/// This does use shared memory!!!
+/// Untested.
+__global__ void MatMul(float* A, float* B, float* C, int ARows, int ACols, int BRows,
+                       int BCols, int CRows, int CCols)
+{
+    float CValue = 0;
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    __shared__ float As[TILE_DIM][TILE_DIM];
+    __shared__ float Bs[TILE_DIM][TILE_DIM];
+
+    for (int k = 0; k < (TILE_DIM + ACols - 1)/TILE_DIM; k++) {
+
+        if (k*TILE_DIM + threadIdx.x < ACols && Row < ARows)
+            As[threadIdx.y][threadIdx.x] = A[Row*ACols + k*TILE_DIM + threadIdx.x];
+        else
+            As[threadIdx.y][threadIdx.x] = 0.0;
+
+        if (k*TILE_DIM + threadIdx.y < BRows && Col < BCols)
+            Bs[threadIdx.y][threadIdx.x] = B[(k*TILE_DIM + threadIdx.y)*BCols + Col];
+        else
+            Bs[threadIdx.y][threadIdx.x] = 0.0;
+
+        __syncthreads();
+
+        for (int n = 0; n < TILE_DIM; ++n)
+            CValue += As[threadIdx.y][n] * Bs[n][threadIdx.x];
+
+        __syncthreads();
+    }
+
+    if (Row < CRows && Col < CCols)
+        C[((blockIdx.y * blockDim.y + threadIdx.y)*CCols) +
+          (blockIdx.x * blockDim.x)+ threadIdx.x] = CValue;
+}
+
+/// TEST -- NOT EXPORTED
+/// CUDA kernel to add elements of two arrays
+__global__ void add(int n, float *x, float *y) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride)
+        y[i] = x[i] + y[i];
+}
+
+/// See: https://developer.nvidia.com/blog/even-easier-introduction-cuda/
+int main(void) {
+    int N = 4;
+    float *x, *y, *out;
+
+    // Allocate Unified Memory -- accessible from CPU or GPU
+    // See: https://developer.nvidia.com/blog/unified-memory-cuda-beginners/
+    cudaMallocManaged(&x, N*sizeof(float));
+    cudaMallocManaged(&y, N*sizeof(float));
+    cudaMallocManaged(&out, N*sizeof(float));
+
+    // initialize x and y arrays on the host
+    for (int i = 0; i < N; i++) {
+        x[i] = 1.0f;
+        y[i] = 2.0f;
+    }
+
+    // Launch kernel on 1M elements on the GPU
+    dim3 dimBlock(16, 16);
+    mm_kernel<<<1, dimBlock>>>(x, y, out, 2);
+
+    // Wait for GPU to finish before accessing on host
+    cudaDeviceSynchronize();
+
+    // Print out the matrix
+    for (int i = 0; i < N; ++i) {
+        std::cout << out[i] << " ";
+    }
+
+    // Free memory
+    cudaFree(x);
+    cudaFree(y);
+
+    return 0;
 }
