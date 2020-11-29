@@ -16,9 +16,11 @@ extern "C" __global__ void mm_kernel(float* A, float* B, float* C, int n) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;    // block Index * how wide the block is + thread index
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     if (row < n && col < n) {
+        float sum = 0.0f;
         for (int i = 0; i < n; ++i) {
-            C[row * n + col] += A[row * n + i] * B[i * n + col];
+            sum += A[row * n + i] * B[i * n + col];
         }
+        C[row * n + col] = sum;
     }
 
     // Multiplying IxJ matrix with JxK matrix gives a matrix with IxK

@@ -1,13 +1,13 @@
-// #[macro_use]
-// extern crate rustacuda;
-// extern crate rustacuda_core;
-
 use rustacuda::prelude::*;
 use rustacuda::launch;
 use rustacuda::memory::DeviceBox;
 use std::error::Error;
 use std::ffi::CString;
 
+/// Examples:
+/// Adding two numbers: https://bheisler.github.io/RustaCUDA/rustacuda/index.html
+/// Adding two arrays of numbers: https://bheisler.github.io/RustaCUDA/rustacuda/macro.launch.html
+///
 fn main() -> Result<(), Box<dyn Error>> {
     // Initialize the CUDA API
     rustacuda::init(CudaFlags::empty())?;
@@ -26,43 +26,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Create a stream to submit work to
     let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
 
-    // Allocate space on the device and copy numbers to it.
-    // let mut x = DeviceBox::new(&10.0f32)?;
-    // let mut y = DeviceBox::new(&20.0f32)?;
-    // let mut result = DeviceBox::new(&0.0f32)?;
-
-    // You can also do this with DevicBuffer
-    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 10])?;
-    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 10])?;
-    let mut out_1 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
-    let mut out_2 = DeviceBuffer::from_slice(&[0.0f32; 10])?;
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32, 2.0f32, 3.0f32, 4.0f32])?;
+    let mut in_y = DeviceBuffer::from_slice(&[5.0f32, 6.0f32, 7.0f32, 8.0f32])?;
+    let mut out = DeviceBuffer::from_slice(&[0.0f32; 4])?;
 
     // Launching kernels is unsafe since Rust can't enforce safety - think of kernel launches
     // as a foreign-function call. In this case, it is - this kernel is written in CUDA C.
     unsafe {
-        // Launch the kernel with one block of one thread, no dynamic shared memory on `stream`.
-        let result = launch!(module.sum<<<1, 1, 0, stream>>>(
-            in_x.as_device_ptr(),
-            in_y.as_device_ptr(),
-            out_1.as_device_ptr(),
-            out_1.len()
-        ));
-        // `launch!` returns an error in case anything went wrong with the launch itself, but
-        // kernel launches are asynchronous so errors caused by the kernel (eg. invalid memory
-        // access) will show up later at some other CUDA API call (probably at `synchronize()`
-        // below).
-        result?;
-
-        // Launch the kernel again using the `function` form:
-        let function_name = CString::new("sum")?;
-        let sum = module.get_function(&function_name)?;
+        let function_name = CString::new("mm_kernel")?;
+        let mm_kernel = module.get_function(&function_name)?;
         // Launch with 1x1x1 (1) blocks of 10x1x1 (10) threads, to show that you can use tuples to
         // configure grid and block size.
-        let result = launch!(sum<<<(1, 1, 1), (10, 1, 1), 0, stream>>>(
+        let result = launch!(mm_kernel<<<1, 3, 0, stream>>>(
             in_x.as_device_ptr(),
             in_y.as_device_ptr(),
-            out_2.as_device_ptr(),
-            out_2.len()
+            out.as_device_ptr(),
+            out.len()
         ));
         result?;
     }
@@ -70,20 +49,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // The kernel launch is asynchronous, so we wait for the kernel to finish executing
     stream.synchronize()?;
 
-    // Copy the result back to the host
-    // let mut result_host = 0.0f32;
-    // result.copy_to(&mut result_host)?;
-
     // Copy the results back to host memory
-    let mut out_host = [0.0f32; 20];
-    out_1.copy_to(&mut out_host[0..10])?;
-    out_2.copy_to(&mut out_host[10..20])?;
+    let mut out_host = [0.0f32; 4];
+    out.copy_to(&mut out_host)?;
 
-    for x in out_host.iter() {
-        assert_eq!(3.0, *x);
-    }
-
-    println!("Sums are {:?}", out_host);
-
+    println!("{:?}", out_host);
     Ok(())
 }
