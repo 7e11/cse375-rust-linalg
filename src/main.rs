@@ -4,8 +4,9 @@ use std::error::Error;
 use std::ffi::CString;
 
 // Comparison linalg libraries
-use ndarray::Array;
+use ndarray::{Array, ShapeBuilder};
 use std::time::Instant;
+use linalg::cuda_dot;
 
 
 /// Examples:
@@ -15,19 +16,30 @@ use std::time::Instant;
 fn main() {
     benchmark_ndarray_multiplication();
     rust_cuda();
+    test_dot_impl();
+}
+
+fn test_dot_impl() {
+    let shape = 10;
+    let a = Array::from_shape_simple_fn((shape, shape).set_f(false), || 1f32);
+    let b = Array::from_shape_simple_fn((shape, shape).set_f(false), || 2f32);
+    let start = Instant::now();
+    let c = cuda_dot(a.view(), b.view());
+    println!("{:?}", c);
+    println!("Elapsed Time: {:?}", start.elapsed());
 }
 
 fn benchmark_ndarray_multiplication() {
-    let shape = 1000;
+    let shape = 10;
     let a = Array::from_shape_simple_fn((shape, shape), || 1f32);
     let b = Array::from_shape_simple_fn((shape, shape), || 2f32);
     let start = Instant::now();
     let c = a.dot(&b);
     println!("{:?}", c);
     println!("Elapsed Time: {:?}", start.elapsed());
-
 }
 
+const SHAPE: usize = 10;
 fn rust_cuda() -> Result<(), Box<dyn Error>> {
     // Initialize the CUDA API
     rustacuda::init(CudaFlags::empty())?;
@@ -46,27 +58,20 @@ fn rust_cuda() -> Result<(), Box<dyn Error>> {
     // Create a stream to submit work to
     let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
 
-    let shape = 1000;
-    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; 1000*1000])?;
-    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; 1000*1000])?;
-    let mut out = DeviceBuffer::from_slice(&[0.0f32; 1000*1000])?;
+
+    let mut in_x = DeviceBuffer::from_slice(&[1.0f32; SHAPE*SHAPE])?;
+    let mut in_y = DeviceBuffer::from_slice(&[2.0f32; SHAPE*SHAPE])?;
+    let mut out = DeviceBuffer::from_slice(&[0.0f32; SHAPE*SHAPE])?;
 
     // Launching kernels is unsafe since Rust can't enforce safety - think of kernel launches
     // as a foreign-function call. In this case, it is - this kernel is written in CUDA C.
     let start = Instant::now();
     unsafe {
-        // Launch with 1x1x1 (1) blocks of 10x1x1 (10) threads, to show that you can use tuples to
-        // configure grid and block size.
-        let result = launch!(module.mm_noshared<<<(1, 1, 1), (32, 32, 1), 0, stream>>>(
+        let result = launch!(module.mm_kernel<<<(64, 64, 1), (16, 16, 1), 0, stream>>>(
             in_x.as_device_ptr(),
             in_y.as_device_ptr(),
             out.as_device_ptr(),
-            1000, // a rows
-            1000, // a cols
-            1000, // b rows
-            1000, // b cols
-            1000, // c rows
-            1000  // c cols
+            SHAPE
         ));
         result?;
     }
@@ -76,7 +81,7 @@ fn rust_cuda() -> Result<(), Box<dyn Error>> {
     println!("Elapsed Time after synchronize: {:?}", start.elapsed());
 
     // Copy the results back to host memory
-    let mut out_host = [0.0f32; 1000*1000];
+    let mut out_host = [0.0f32; SHAPE*SHAPE];
     out.copy_to(&mut out_host)?;
     println!("Elapsed Time after copy back to host mem: {:?}", start.elapsed());
 
